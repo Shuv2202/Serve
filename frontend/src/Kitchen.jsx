@@ -1,9 +1,20 @@
 import { useCallback, useState, useEffect } from 'react';
 import './App.css';
-
-const API_URL = `http://${window.location.hostname}:8000`;
+import { API_URL, WS_URL, IS_MISSING_CONFIG } from './config';
 
 function Kitchen() {
+  if (IS_MISSING_CONFIG) {
+    return (
+      <div className="kitchen-container" style={{ padding: '40px', textAlign: 'center' }}>
+        <h2>Backend Connection Required</h2>
+        <p style={{ margin: '15px 0' }}>The kitchen dashboard is deployed, but the backend API URL has not been configured.</p>
+        <p style={{ fontSize: '14px', color: '#666' }}>
+          Please add the <code>VITE_API_URL</code> environment variable in your Netlify site settings pointing to your Railway backend URL (e.g. <code>https://serve-production.up.railway.app</code>).
+        </p>
+      </div>
+    );
+  }
+
   const [orders, setOrders] = useState([]);
   const params = new URLSearchParams(window.location.search);
   const RESTAURANT_ID = Number(params.get('restaurant_id')) || 1;
@@ -21,20 +32,31 @@ function Kitchen() {
   useEffect(() => {
     fetchOrders();
 
-    const ws = new WebSocket(`ws://${window.location.hostname}:8000/ws/kitchen/${RESTAURANT_ID}`);
+    let ws;
+    try {
+      if (WS_URL) {
+        ws = new WebSocket(`${WS_URL}/ws/kitchen/${RESTAURANT_ID}`);
 
-    ws.onmessage = (event) => {
-      if (event.data === 'UPDATE_ORDERS') {
-        console.log('Real-time order signal received. Refreshing dashboard.');
-        fetchOrders();
+        ws.onmessage = (event) => {
+          if (event.data === 'UPDATE_ORDERS') {
+            console.log('Real-time order signal received. Refreshing dashboard.');
+            fetchOrders();
+          }
+        };
+
+        ws.onerror = (error) => {
+          console.error('Kitchen WebSocket error', error);
+        };
+      }
+    } catch (err) {
+      console.error('Failed to establish WebSocket connection:', err);
+    }
+
+    return () => {
+      if (ws) {
+        ws.close();
       }
     };
-
-    ws.onerror = (error) => {
-      console.error('Kitchen WebSocket error', error);
-    };
-
-    return () => ws.close();
   }, [RESTAURANT_ID, fetchOrders]);
 
   const updateStatus = async (orderId, newStatus) => {

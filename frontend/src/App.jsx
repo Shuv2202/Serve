@@ -1,9 +1,20 @@
 import { useState, useEffect } from 'react';
 import './App.css';
-
-const API_URL = `http://${window.location.hostname}:8000`;
+import { API_URL, IS_MISSING_CONFIG } from './config';
 
 function App() {
+  if (IS_MISSING_CONFIG) {
+    return (
+      <div className="loading" style={{ padding: '40px', textAlign: 'center' }}>
+        <h2>Backend Connection Required</h2>
+        <p style={{ margin: '15px 0' }}>The application is deployed, but the backend API URL has not been configured.</p>
+        <p style={{ fontSize: '14px', color: '#888' }}>
+          Please add the <code>VITE_API_URL</code> environment variable in your Netlify site settings pointing to your Railway backend URL (e.g. <code>https://serve-production.up.railway.app</code>).
+        </p>
+      </div>
+    );
+  }
+
   const [restaurant, setRestaurant] = useState(null);
   const [error, setError] = useState('');
   const [cart, setCart] = useState({});
