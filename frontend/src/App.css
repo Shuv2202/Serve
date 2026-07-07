@@ -999,6 +999,24 @@ body {
   animation: order-pulse-highlight 2s ease-in-out infinite;
 }
 
+.cart-item-notes-input {
+  width: 100%;
+  padding: 6px 10px;
+  margin-top: 8px;
+  font-size: 12px;
+  border: 1px solid #7cb342;
+  border-radius: 4px;
+  outline: none;
+  background-color: #fafdf6;
+  color: #333333;
+  transition: all 0.2s ease;
+}
+
+.cart-item-notes-input:focus {
+  background-color: #ffffff;
+  box-shadow: 0 0 0 2px rgba(124, 179, 66, 0.15);
+}
+
 /* --- Kitchen Header Actions & Buttons --- */
 .kitchen-header-actions {
   display: flex;

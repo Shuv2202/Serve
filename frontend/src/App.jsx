@@ -93,11 +93,25 @@ function App() {
     });
   };
 
+  const updateCartItemNotes = (itemId, notes) => {
+    setCart((prev) => {
+      if (!prev[itemId]) return prev;
+      return {
+        ...prev,
+        [itemId]: {
+          ...prev[itemId],
+          notes,
+        },
+      };
+    });
+  };
+
   const handleCheckout = async () => {
     // Format cart data for the backend schema
     const orderItems = Object.values(cart).map((item) => ({
       menu_item_id: item.id,
       quantity: item.quantity,
+      notes: item.notes || null,
     }));
 
     try {
@@ -201,6 +215,15 @@ function App() {
                       </div>
                       <p className="item-price">₹{item.price}</p>
                       {item.description && <p className="item-desc">{item.description}</p>}
+                      {cart[item.id] && (
+                        <input
+                          type="text"
+                          className="cart-item-notes-input"
+                          placeholder="Instructions (e.g., Less spicy, no onion)"
+                          value={cart[item.id].notes || ''}
+                          onChange={(e) => updateCartItemNotes(item.id, e.target.value)}
+                        />
+                      )}
                       <a href="#" className="more-link" onClick={(e) => e.preventDefault()}>More</a>
                     </div>
                     <div className="item-action-area">
