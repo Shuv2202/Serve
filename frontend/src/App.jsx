@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import './App.css';
 import { API_URL, IS_MISSING_CONFIG } from './config';
+import { io } from 'socket.io-client';
 
 function App() {
   if (IS_MISSING_CONFIG) {
@@ -9,7 +10,7 @@ function App() {
         <h2>Backend Connection Required</h2>
         <p style={{ margin: '15px 0' }}>The application is deployed, but the backend API URL has not been configured.</p>
         <p style={{ fontSize: '14px', color: '#888' }}>
-          Please add the <code>VITE_API_URL</code> environment variable in your Netlify site settings pointing to your Railway backend URL (e.g. <code>https://serve-production.up.railway.app</code>).
+          Please add the <code>VITE_API_URL</code> environment variable in your site configuration settings pointing to your backend URL (e.g. <code>https://your-backend-url.com</code>).
         </p>
       </div>
     );
@@ -25,8 +26,7 @@ function App() {
   const params = new URLSearchParams(window.location.search);
   const RESTAURANT_ID = Number(params.get('restaurant_id')) || 1;
 
-  useEffect(() => {
-    // Fetch the menu data when the app loads
+  const fetchMenu = useCallback(() => {
     fetch(`${API_URL}/restaurants/${RESTAURANT_ID}`)
       .then((res) => {
         if (!res.ok) throw new Error(`Restaurant ${RESTAURANT_ID} was not found`);
@@ -42,6 +42,32 @@ function App() {
         setError(err.message);
       });
   }, [RESTAURANT_ID]);
+
+  useEffect(() => {
+    fetchMenu();
+  }, [fetchMenu]);
+
+  useEffect(() => {
+    const socket = io(API_URL, {
+      path: '/socket.io'
+    });
+
+    socket.on('connect', () => {
+      console.log('Connected to Socket.io backend');
+      socket.emit('join_restaurant', { restaurant_id: RESTAURANT_ID });
+    });
+
+    socket.on('menu_update', (data) => {
+      if (data === 'UPDATE_MENU') {
+        console.log('Real-time menu update received. Refreshing menu.');
+        fetchMenu();
+      }
+    });
+
+    return () => {
+      socket.disconnect();
+    };
+  }, [RESTAURANT_ID, fetchMenu]);
 
   const addToCart = (item) => {
     setCart((prev) => ({

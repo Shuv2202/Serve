@@ -4,7 +4,7 @@ const getBackendUrls = () => {
   // Check if we are running locally
   const isLocal = hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('192.168.') || hostname.startsWith('10.');
   
-  // Check for environment variables set during Netlify build
+  // Check for environment variables set during build
   const envApiUrl = import.meta.env.VITE_API_URL;
   
   if (envApiUrl) {

@@ -2,7 +2,7 @@
 from datetime import datetime
 import enum
 
-from sqlalchemy import Column, Integer, String, Float, Boolean, ForeignKey, DateTime, Enum
+from sqlalchemy import Column, Integer, String, Text, Float, Boolean, ForeignKey, DateTime, Enum
 from sqlalchemy.orm import relationship, declarative_base
 
 Base = declarative_base()
@@ -38,9 +38,12 @@ class MenuItem(Base):
     price = Column(Float, nullable=False)
     image_url = Column(String(500), nullable=True)
     is_available = Column(Boolean, default=True)
+    is_active = Column(Boolean, default=True, nullable=False)
     is_veg = Column(Boolean, default=True)
     is_spicy = Column(Boolean, default=False)
     tags = Column(String(255), nullable=True) # e.g., "Special, Bestseller"
+    stock = Column(Integer, default=0, nullable=False)
+    recipe_instructions = Column(Text, nullable=True)  # Kitchen prep instructions
     category_id = Column(Integer, ForeignKey("categories.id", ondelete="CASCADE"), nullable=False)
 
     # Relationships
@@ -81,6 +84,7 @@ class OrderItem(Base):
     menu_item_id = Column(Integer, ForeignKey("menu_items.id", ondelete="CASCADE"), nullable=False)
     quantity = Column(Integer, nullable=False)
     price_at_time_of_order = Column(Float, nullable=False)
+    notes = Column(String(500), nullable=True)  # Per-item kitchen instructions
 
     # Relationships
     order = relationship("Order", back_populates="items")
