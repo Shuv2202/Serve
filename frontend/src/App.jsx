@@ -342,6 +342,32 @@ function App() {
                       {item.stock !== undefined && item.stock !== null && item.stock <= 0 && (
                         <p className="out-of-stock-warning">🚫 Out of stock</p>
                       )}
+
+                      {cart[item.id] && (
+                        <div className="instructions-area">
+                          <div className="quick-notes-container">
+                            {['🌶️ Spicy', '🚫 No Onion', '🚫 No Garlic', '🧀 More Cheese', '🧂 Less Salt'].map((option) => {
+                              const isSelected = (cart[item.id].notes || '').includes(option);
+                              return (
+                                <button
+                                  key={option}
+                                  className={`quick-note-chip ${isSelected ? 'selected' : ''}`}
+                                  onClick={() => toggleQuickNote(item.id, option)}
+                                >
+                                  {option}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          <input
+                            type="text"
+                            className="cart-item-notes-input"
+                            placeholder="Or type other instructions..."
+                            value={cart[item.id].notes || ''}
+                            onChange={(e) => updateCartItemNotes(item.id, e.target.value)}
+                          />
+                        </div>
+                      )}
                     </div>
                     
                     <div className="item-action-area">
