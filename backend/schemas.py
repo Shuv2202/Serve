@@ -14,6 +14,7 @@ class MenuItemBase(BaseModel):
     tags: Optional[str] = None
     is_active: Optional[bool] = True
     recipe_instructions: Optional[str] = None
+    stock: Optional[int] = 0
 
 class MenuItemCreate(MenuItemBase):
     pass

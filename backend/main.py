@@ -440,9 +440,9 @@ def get_products(status: Optional[str] = None, restaurant_id: int = 1, db: Sessi
 async def create_product(product: schemas.ProductCreate, restaurant_id: int = 1, db: Session = Depends(get_db)):
     sku_val = f"SKU-{uuid.uuid4().hex[:8].upper()}"
     
-    cat_name = product.category or "Others"
+    cat_name = (product.category or "Others").strip().title()
     category = db.query(models.Category).filter(
-        models.Category.name == cat_name,
+        func.lower(models.Category.name) == func.lower(cat_name),
         models.Category.restaurant_id == restaurant_id
     ).first()
     
@@ -450,7 +450,7 @@ async def create_product(product: schemas.ProductCreate, restaurant_id: int = 1,
         # Verify restaurant exists
         db_restaurant = db.query(models.Restaurant).filter(models.Restaurant.id == restaurant_id).first()
         if not db_restaurant:
-            db_restaurant = models.Restaurant(id=restaurant_id, name="ServeME Restaurant")
+            db_restaurant = models.Restaurant(id=restaurant_id, name="Serve Me")
             db.add(db_restaurant)
             db.commit()
             db.refresh(db_restaurant)
@@ -468,7 +468,7 @@ async def create_product(product: schemas.ProductCreate, restaurant_id: int = 1,
         price=product.price,
         image_url=product.image_url,
         is_active=is_active_val,
-        is_available=False,  # Draft status until applied
+        is_available=is_active_val,  # Set available immediately if active so it displays on the menu
         is_veg=product.is_veg,
         is_spicy=product.is_spicy,
         tags=sku_val,
@@ -529,9 +529,9 @@ async def update_product(product_id: int, product: schemas.ProductUpdate, restau
     if not db_item:
         raise HTTPException(status_code=404, detail="Product not found")
         
-    cat_name = product.category or "Others"
+    cat_name = (product.category or "Others").strip().title()
     category = db.query(models.Category).filter(
-        models.Category.name == cat_name,
+        func.lower(models.Category.name) == func.lower(cat_name),
         models.Category.restaurant_id == restaurant_id
     ).first()
     
@@ -546,7 +546,7 @@ async def update_product(product_id: int, product: schemas.ProductUpdate, restau
     db_item.name = product.product_name
     db_item.price = product.price
     db_item.is_active = is_active_val
-    db_item.is_available = False  # Reset to draft until applied
+    db_item.is_available = is_active_val  # Set available immediately if active so it displays on the menu
     if product.image_url is not None:
         db_item.image_url = product.image_url
     db_item.is_veg = product.is_veg

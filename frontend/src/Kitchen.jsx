@@ -1,4 +1,4 @@
-import { useCallback, useState, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import './App.css';
 import { API_URL, IS_MISSING_CONFIG } from './config';
@@ -7,18 +7,31 @@ import { io } from 'socket.io-client';
 // ─── Helper: compute minutes since a timestamp ───────────────────────────────
 function getAgeMinutes(createdAt, now) {
   if (!createdAt) return 0;
-  return Math.floor((now - new Date(createdAt).getTime()) / 60000);
+  const dateStr = createdAt.endsWith('Z') ? createdAt : `${createdAt}Z`;
+  return Math.floor((now - new Date(dateStr).getTime()) / 60000);
 }
 
-function formatAge(minutes) {
-  if (minutes < 1) return '<1m';
-  if (minutes < 60) return `${minutes}m`;
-  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+// ─── Helper: format elapsed time in MM:SS ────────────────────────────────────
+function formatElapsed(createdAt, now) {
+  if (!createdAt) return '00:00';
+  const dateStr = createdAt.endsWith('Z') ? createdAt : `${createdAt}Z`;
+  const diffMs = now - new Date(dateStr).getTime();
+  if (diffMs < 0) return '00:00';
+  const diffSecs = Math.floor(diffMs / 1000);
+  const mins = Math.floor(diffSecs / 60);
+  const secs = diffSecs % 60;
+  
+  if (mins >= 60) {
+    const hours = Math.floor(mins / 60);
+    const remMins = mins % 60;
+    return `${hours}h ${String(remMins).padStart(2, '0')}m`;
+  }
+  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
 // ─── Urgency tier based on age + status ──────────────────────────────────────
 function getUrgencyClass(status, ageMinutes) {
-  if (status !== 'pending') return '';
+  if (status !== 'pending' && status !== 'cooking') return '';
   if (ageMinutes >= 10) return 'urgency-critical';
   if (ageMinutes >= 5) return 'urgency-high';
   return '';
@@ -48,7 +61,7 @@ function playChime(volume = 0.5) {
   }
 }
 
-// ─── Recipe Modal ─────────────────────────────────────────────────────────────
+// ─── Recipe Modal Component ──────────────────────────────────────────────────
 function RecipeModal({ item, onClose }) {
   return (
     <AnimatePresence>
@@ -83,8 +96,8 @@ function RecipeModal({ item, onClose }) {
               ) : (
                 <div className="recipe-empty">
                   <span className="recipe-empty-icon">📋</span>
-                  <p>No recipe on file for this item.</p>
-                  <p className="recipe-empty-sub">Ask your head chef or update via the admin panel.</p>
+                  <p>No recipe instructions registered for this dish.</p>
+                  <p className="recipe-empty-sub">Instructions can be added via the database editor.</p>
                 </div>
               )}
             </div>
@@ -95,44 +108,6 @@ function RecipeModal({ item, onClose }) {
   );
 }
 
-// ─── Prep View Panel ──────────────────────────────────────────────────────────
-function PrepView({ orders }) {
-  // Aggregate quantities for pending + cooking orders only
-  const aggregated = useMemo(() => {
-    const map = {};
-    orders
-      .filter(o => o.status === 'pending' || o.status === 'cooking')
-      .forEach(order => {
-        order.items.forEach(item => {
-          const name = item.menu_item_name || `Item #${item.menu_item_id}`;
-          map[name] = (map[name] || 0) + item.quantity;
-        });
-      });
-    return Object.entries(map).sort((a, b) => b[1] - a[1]);
-  }, [orders]);
-
-  if (aggregated.length === 0) {
-    return (
-      <div className="prep-view-panel">
-        <p className="prep-view-empty">No active items to prep right now.</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="prep-view-panel">
-      <p className="prep-view-subtitle">Aggregate across all pending & cooking orders</p>
-      <div className="prep-chips-grid">
-        {aggregated.map(([name, qty]) => (
-          <div key={name} className="prep-item-chip">
-            <span className="prep-qty">{qty}×</span>
-            <span className="prep-name">{name}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 // ─── Main Kitchen Component ───────────────────────────────────────────────────
 function Kitchen() {
@@ -160,15 +135,16 @@ function Kitchen() {
   const [seenOrderIds, setSeenOrderIds] = useState(new Set());
   const [newOrderIds, setNewOrderIds] = useState([]);
   const [now, setNow] = useState(Date.now());
-  const [prepViewOpen, setPrepViewOpen] = useState(false);
+
   const [recipeItem, setRecipeItem] = useState(null); // { name, recipe_instructions }
+  const [activeTab, setActiveTab] = useState('pending');
 
   const params = new URLSearchParams(window.location.search);
   const RESTAURANT_ID = Number(params.get('restaurant_id')) || 1;
 
-  // Clock tick every 30s for urgency recalculation
+  // Clock tick every second for high-precision timer display
   useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 30000);
+    const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
 
@@ -194,7 +170,7 @@ function Kitchen() {
     }
   }, [orders, seenOrderIds, soundEnabled, volume]);
 
-  // Socket.io real-time
+  // Socket.io real-time connection
   useEffect(() => {
     fetchOrders();
     const socket = io(API_URL, { path: '/socket.io' });
@@ -236,36 +212,132 @@ function Kitchen() {
     playChime(v);
   };
 
-  // Stats
-  const pendingCount = orders.filter(o => o.status === 'pending').length;
-  const cookingCount = orders.filter(o => o.status === 'cooking').length;
-  const readyCount = orders.filter(o => o.status === 'ready').length;
+  // Status-based ordering
+  const pendingOrders = useMemo(() => orders.filter(o => o.status === 'pending'), [orders]);
+  const cookingOrders = useMemo(() => orders.filter(o => o.status === 'cooking'), [orders]);
+  const readyOrders = useMemo(() => orders.filter(o => o.status === 'ready'), [orders]);
 
-  const avgPrepTime = useMemo(() => {
-    const active = orders.filter(o => o.status === 'cooking' || o.status === 'pending');
-    if (!active.length) return null;
-    const total = active.reduce((s, o) => s + getAgeMinutes(o.created_at, now), 0);
-    return Math.round(total / active.length);
-  }, [orders, now]);
+  // General counts
+  const pendingCount = pendingOrders.length;
+  const cookingCount = cookingOrders.length;
+  const readyCount = readyOrders.length;
+
+
 
   const cardVariants = {
-    initial: { opacity: 0, scale: 0.92, y: 20 },
-    animate: { opacity: 1, scale: 1, y: 0, transition: { type: 'spring', stiffness: 280, damping: 24 } },
-    exit: { opacity: 0, x: 80, scale: 0.95, transition: { duration: 0.3 } }
+    initial: { opacity: 0, scale: 0.92, y: 15 },
+    animate: { opacity: 1, scale: 1, y: 0, transition: { type: 'spring', stiffness: 300, damping: 25 } },
+    exit: { opacity: 0, x: -50, scale: 0.95, transition: { duration: 0.2 } }
+  };
+
+  const renderOrderCard = (order) => {
+    const isNew = newOrderIds.includes(order.id);
+    const displayNum = String(order.order_number).padStart(3, '0');
+    const ageMinutes = getAgeMinutes(order.created_at, now);
+    const elapsedStr = formatElapsed(order.created_at, now);
+    const urgencyClass = getUrgencyClass(order.status, ageMinutes);
+    const statusClass = order.status.toLowerCase();
+
+    return (
+      <motion.div
+        key={order.id}
+        layout
+        variants={cardVariants}
+        initial="initial"
+        animate="animate"
+        exit="exit"
+        className={`order-card-glass status-${statusClass} ${isNew ? 'new-order-glow' : ''} ${urgencyClass}`}
+      >
+        {/* Glowing top status bar */}
+        <div className={`card-edge edge-${statusClass}`} />
+
+        {/* Card Header */}
+        <div className="order-card-header">
+          <div className="order-id-area">
+            <span className="order-number">#{displayNum}</span>
+            <span className="order-age">⏳ {elapsedStr}</span>
+          </div>
+          <div className={`status-led-group status-${statusClass}`}>
+            <span className={`status-led ${urgencyClass ? 'led-urgent' : ''}`} />
+            <span className="status-label">{order.status}</span>
+          </div>
+        </div>
+
+        {/* Order Items */}
+        <ul className="order-items-list">
+          {order.items.map(item => (
+            <li key={item.id}>
+              <div className="order-item-line">
+                <span className="item-qty">{item.quantity}×</span>
+                <div className="order-item-info">
+                  <button
+                    className="item-name-btn"
+                    onClick={() => setRecipeItem({
+                      name: item.menu_item_name || `Item #${item.menu_item_id}`,
+                      recipe_instructions: item.recipe_instructions
+                    })}
+                    title="Click to view preparation recipe"
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#cbd5e1',
+                      fontFamily: 'inherit',
+                      fontSize: '14px',
+                      fontWeight: 500,
+                      textAlign: 'left',
+                      cursor: 'pointer',
+                      padding: 0
+                    }}
+                  >
+                    {item.menu_item_name || `Item #${item.menu_item_id}`}
+                  </button>
+                  {item.notes && (
+                    <span className="item-notes">📝 {item.notes}</span>
+                  )}
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+
+        {/* Action Button */}
+        <div className="order-actions">
+          {order.status === 'pending' && (
+            <button onClick={() => updateStatus(order.id, 'cooking')} className="btn-pill btn-cooking">
+              <span className="btn-icon">🔥</span>
+              <span className="btn-text">Start Cooking</span>
+            </button>
+          )}
+          {order.status === 'cooking' && (
+            <button onClick={() => updateStatus(order.id, 'ready')} className="btn-pill btn-ready">
+              <span className="btn-icon">✅</span>
+              <span className="btn-text">Mark Ready</span>
+            </button>
+          )}
+          {order.status === 'ready' && (
+            <button onClick={() => updateStatus(order.id, 'completed')} className="btn-pill btn-complete">
+              <span className="btn-icon">🤝</span>
+              <span className="btn-text">Picked Up</span>
+            </button>
+          )}
+        </div>
+      </motion.div>
+    );
   };
 
   return (
     <div className="kitchen-container">
-      {/* ── Recipe Modal ── */}
+      {/* ── Recipe Modal Popup ── */}
       <RecipeModal item={recipeItem} onClose={() => setRecipeItem(null)} />
 
       {/* ── Header ── */}
       <header className="kitchen-header">
         <div className="kitchen-title-area">
-          <h1>Kitchen</h1>
+          <h1>Kitchen Dashboard</h1>
           <span className="live-indicator">Live</span>
         </div>
 
+        {/* Aggregate Stats */}
         <div className="kitchen-stats">
           <div className="stat-chip pending">
             <span className="stat-dot dot-pending" />
@@ -282,22 +354,13 @@ function Kitchen() {
             <span className="label">Ready</span>
             <span className="value">{readyCount}</span>
           </div>
-          {avgPrepTime !== null && (
-            <div className="stat-chip prep-time">
-              <span className="label">Avg Wait</span>
-              <span className="value">{formatAge(avgPrepTime)}</span>
-            </div>
-          )}
+
         </div>
 
+        {/* Global Toolbar */}
         <div className="kitchen-header-actions">
-          <button
-            className={`prep-view-toggle ${prepViewOpen ? 'active' : ''}`}
-            onClick={() => setPrepViewOpen(p => !p)}
-          >
-            <span>⚡</span>
-            <span>Prep View</span>
-          </button>
+
+          
           <div className="sound-controls">
             <button
               className={`sound-toggle-btn ${!soundEnabled ? 'muted' : ''}`}
@@ -307,125 +370,103 @@ function Kitchen() {
               {soundEnabled ? '🔊' : '🔇'}
             </button>
             {soundEnabled && (
-              <input
-                type="range" min="0" max="1" step="0.1"
-                value={volume} onChange={handleVolumeChange}
-                className="volume-slider" title="Adjust Volume"
-              />
+              <>
+                <input
+                  type="range" min="0" max="1" step="0.1"
+                  value={volume} onChange={handleVolumeChange}
+                  className="volume-slider" title="Adjust Volume"
+                />
+
+              </>
             )}
           </div>
         </div>
       </header>
 
-      {/* ── Prep Aggregation Panel ── */}
-      <AnimatePresence>
-        {prepViewOpen && (
-          <motion.div
-            key="prep-panel"
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto', transition: { duration: 0.3 } }}
-            exit={{ opacity: 0, height: 0, transition: { duration: 0.2 } }}
-            style={{ overflow: 'hidden' }}
-          >
-            <PrepView orders={orders} />
-          </motion.div>
-        )}
-      </AnimatePresence>
 
-      {/* ── Order Cards ── */}
-      <div className="orders-masonry">
-        <AnimatePresence>
-          {orders.map(order => {
-            const isNew = newOrderIds.includes(order.id);
-            const displayNum = String(order.order_number).padStart(3, '0');
-            const ageMinutes = getAgeMinutes(order.created_at, now);
-            const urgencyClass = getUrgencyClass(order.status, ageMinutes);
-            const statusClass = order.status.toLowerCase();
 
-            return (
-              <motion.div
-                key={order.id}
-                layout
-                variants={cardVariants}
-                initial="initial"
-                animate="animate"
-                exit="exit"
-                className={`order-card-glass status-${statusClass} ${isNew ? 'new-order-glow' : ''} ${urgencyClass}`}
-              >
-                {/* Glowing top edge */}
-                <div className={`card-edge edge-${statusClass}`} />
+      {/* Mobile Kanban Tabs Bar */}
+      <div className="mobile-kanban-tabs">
+        <button
+          className={`kanban-tab-btn tab-pending ${activeTab === 'pending' ? 'active' : ''}`}
+          onClick={() => setActiveTab('pending')}
+        >
+          <span className="tab-dot dot-pending" />
+          <span>Pending ({pendingCount})</span>
+        </button>
+        <button
+          className={`kanban-tab-btn tab-cooking ${activeTab === 'cooking' ? 'active' : ''}`}
+          onClick={() => setActiveTab('cooking')}
+        >
+          <span className="tab-dot dot-cooking" />
+          <span>Cooking ({cookingCount})</span>
+        </button>
+        <button
+          className={`kanban-tab-btn tab-ready ${activeTab === 'ready' ? 'active' : ''}`}
+          onClick={() => setActiveTab('ready')}
+        >
+          <span className="tab-dot dot-ready" />
+          <span>Ready ({readyCount})</span>
+        </button>
+      </div>
 
-                {/* Card Header */}
-                <div className="order-card-header">
-                  <div className="order-id-area">
-                    <span className="order-number">#{displayNum}</span>
-                    <span className="order-age">{formatAge(ageMinutes)} ago</span>
-                  </div>
-                  <div className={`status-led-group status-${statusClass}`}>
-                    <span className={`status-led ${urgencyClass ? 'led-urgent' : ''}`} />
-                    <span className="status-label">{order.status}</span>
-                  </div>
-                </div>
-
-                {/* Items List */}
-                <ul className="order-items-list">
-                  {order.items.map(item => (
-                    <li key={item.id}>
-                      <div className="order-item-line">
-                        <span className="item-qty">{item.quantity}×</span>
-                        <div className="order-item-info">
-                          <button
-                            className="item-name item-name-btn"
-                            onClick={() => setRecipeItem({
-                              name: item.menu_item_name || `Item #${item.menu_item_id}`,
-                              recipe_instructions: item.recipe_instructions
-                            })}
-                            title="View preparation instructions"
-                          >
-                            {item.menu_item_name || `Item #${item.menu_item_id}`}
-                          </button>
-                          {item.notes && (
-                            <span className="item-notes">📝 {item.notes}</span>
-                          )}
-                        </div>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-
-                {/* Action Button */}
-                <div className="order-actions">
-                  {order.status === 'pending' && (
-                    <button onClick={() => updateStatus(order.id, 'cooking')} className="btn-pill btn-cooking">
-                      <span className="btn-icon">🔥</span>
-                      <span className="btn-text">Start Cooking</span>
-                    </button>
-                  )}
-                  {order.status === 'cooking' && (
-                    <button onClick={() => updateStatus(order.id, 'ready')} className="btn-pill btn-ready">
-                      <span className="btn-icon">✅</span>
-                      <span className="btn-text">Mark Ready</span>
-                    </button>
-                  )}
-                  {order.status === 'ready' && (
-                    <button onClick={() => updateStatus(order.id, 'completed')} className="btn-pill btn-complete">
-                      <span className="btn-icon">🤝</span>
-                      <span className="btn-text">Picked Up</span>
-                    </button>
-                  )}
-                </div>
-              </motion.div>
-            );
-          })}
-        </AnimatePresence>
-
-        {orders.length === 0 && (
-          <div className="no-orders">
-            <span style={{ fontSize: '48px', display: 'block', marginBottom: '16px' }}>👨‍🍳</span>
-            <p style={{ fontSize: '18px', fontWeight: 600, marginBottom: '8px' }}>All caught up!</p>
-            <p>No active orders right now. Kitchen is clear.</p>
+      {/* ── 3-Column Kanban Board View ── */}
+      <div className="kitchen-board-columns">
+        
+        {/* 1. Pending Column */}
+        <div className={`kanban-column column-pending ${activeTab === 'pending' ? 'mobile-visible' : 'mobile-hidden'}`}>
+          <div className="column-header">
+            <h3>Pending Orders</h3>
+            <span className="column-count-badge">{pendingCount}</span>
           </div>
-        )}
+          <div className="column-cards-container">
+            <AnimatePresence mode="popLayout">
+              {pendingOrders.map(order => renderOrderCard(order))}
+            </AnimatePresence>
+            {pendingCount === 0 && (
+              <div className="column-empty-state">
+                <p>No pending orders</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* 2. Cooking Column */}
+        <div className={`kanban-column column-cooking ${activeTab === 'cooking' ? 'mobile-visible' : 'mobile-hidden'}`}>
+          <div className="column-header">
+            <h3>Cooking / Preparing</h3>
+            <span className="column-count-badge">{cookingCount}</span>
+          </div>
+          <div className="column-cards-container">
+            <AnimatePresence mode="popLayout">
+              {cookingOrders.map(order => renderOrderCard(order))}
+            </AnimatePresence>
+            {cookingCount === 0 && (
+              <div className="column-empty-state">
+                <p>No active cooking items</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* 3. Ready Column */}
+        <div className={`kanban-column column-ready ${activeTab === 'ready' ? 'mobile-visible' : 'mobile-hidden'}`}>
+          <div className="column-header">
+            <h3>Ready for Pickup</h3>
+            <span className="column-count-badge">{readyCount}</span>
+          </div>
+          <div className="column-cards-container">
+            <AnimatePresence mode="popLayout">
+              {readyOrders.map(order => renderOrderCard(order))}
+            </AnimatePresence>
+            {readyCount === 0 && (
+              <div className="column-empty-state">
+                <p>No orders ready yet</p>
+              </div>
+            )}
+          </div>
+        </div>
+
       </div>
     </div>
   );

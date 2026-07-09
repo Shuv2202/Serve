@@ -30,7 +30,7 @@ def create_menu_item(category_id, name, description, price, is_veg=True, is_spic
 
 def main():
     # 1. Restaurant
-    restaurant_id = create_restaurant("ServeME Demo")
+    restaurant_id = create_restaurant("Serve Me")
     print("Created restaurant id", restaurant_id)
 
     # 2. Categories
