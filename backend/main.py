@@ -29,6 +29,31 @@ cloudinary.config(
 
 # Create tables
 models.Base.metadata.create_all(bind=engine)
+# Create tables
+models.Base.metadata.create_all(bind=engine)
+
+# Create default restaurant if it doesn't exist
+from sqlalchemy.orm import Session
+
+db = Session(bind=engine)
+
+try:
+    restaurant = db.query(models.Restaurant).filter(
+        models.Restaurant.id == 1
+    ).first()
+
+    if not restaurant:
+        default_restaurant = models.Restaurant(
+            id=1,
+            name="Serve Me"
+        )
+        db.add(default_restaurant)
+        db.commit()
+        print("✅ Default restaurant created (ID=1)")
+finally:
+    db.close()
+
+
 
 
 def ensure_order_kitchen_columns():
@@ -379,7 +404,10 @@ def get_vendor_stats(restaurant_id: int = 1, db: Session = Depends(get_db)):
 
 @app.get("/api/orders")
 def get_orders(restaurant_id: int = 1, db: Session = Depends(get_db)):
-    orders = db.query(models.Order).filter(models.Order.restaurant_id == restaurant_id).order_by(models.Order.id.desc()).all()
+    orders = db.query(models.Order).filter(
+    models.Order.restaurant_id == restaurant_id,
+    models.Order.status == models.OrderStatus.COMPLETED
+).order_by(models.Order.id.desc()).all()
     result = []
     for order in orders:
         result.append({
@@ -387,7 +415,7 @@ def get_orders(restaurant_id: int = 1, db: Session = Depends(get_db)):
             "date": order.created_at.strftime("%Y-%m-%d %H:%M") if order.created_at else "",
             "customer": "Walk-in Customer",
             "mobile": "N/A",
-            "amount": order.total_amount
+            "amount": order.total_amount,
         })
     return result
 
