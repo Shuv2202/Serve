@@ -122,3 +122,77 @@ class ProductStatusUpdate(BaseModel):
     id: int
     status: str
 
+class PaymentCreate(BaseModel):
+    transaction_id: Optional[str] = None
+    payer_name: Optional[str] = None
+    payer_upi: Optional[str] = None
+
+class PaymentVerify(BaseModel):
+    status: str
+
+class PaymentResponse(BaseModel):
+    id: int
+    order_id: int
+    amount: float
+    status: str
+    payment_method: Optional[str] = "UPI"
+    transaction_id: Optional[str] = None
+    payer_name: Optional[str] = None
+    payer_upi: Optional[str] = None
+    payment_time: Optional[datetime] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class VendorPaymentCreate(BaseModel):
+    restaurant_id: int
+    account_holder_name: str
+    upi_id: str
+    qr_image: str
+
+
+class VendorPaymentUpdate(BaseModel):
+   
+    qr_image: str
+   
+
+
+from datetime import datetime
+
+class VendorPaymentResponse(BaseModel):
+    id: int
+    restaurant_id: int
+    account_holder_name: str
+    upi_id: str
+    qr_image: str
+    is_active: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True   # Pydantic v2
+        # orm_mode = True        # Use this instead if you're on Pydantic v1    
+
+class OrderBillItem(BaseModel):
+    name: str
+    quantity: int
+    rate: float
+
+    class Config:
+        from_attributes = True
+
+
+class OrderBillResponse(BaseModel):
+    order_id: int
+    order_number: int
+    customer_name: Optional[str] = "Walk-in Customer"
+    customer_mobile: Optional[str] = ""
+    subtotal: float
+    gst_amount: float = 0
+    total_amount: float
+    items: List[OrderBillItem]
+
+    class Config:
+        from_attributes = True        
+
+

@@ -17,6 +17,7 @@ class Restaurant(Base):
     categories = relationship("Category", back_populates="restaurant", cascade="all, delete-orphan")
 
 
+
 class Category(Base):
     __tablename__ = "categories"
 
@@ -90,4 +91,59 @@ class OrderItem(Base):
     order = relationship("Order", back_populates="items")
     menu_item = relationship("MenuItem")
 
-    
+import enum
+
+class PaymentStatus(str, enum.Enum):
+    PENDING = "pending"
+    PAID = "paid"
+    FAILED = "failed"
+    EXPIRED = "expired"
+    REFUNDED = "refunded"
+
+class Payment(Base):
+    __tablename__ = "payments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    order_id = Column(
+        Integer,
+        ForeignKey("orders.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True
+    )
+    amount = Column(Float, nullable=False)
+    status = Column(
+        Enum(
+            PaymentStatus,
+            values_callable=lambda statuses: [status.value for status in statuses]
+        ),
+        default=PaymentStatus.PENDING,
+        nullable=False
+    )
+    payment_method = Column(String(50), default="UPI")
+    transaction_id = Column(String(255), nullable=True)
+    payer_name = Column(String(255), nullable=True)
+    payer_upi = Column(String(255), nullable=True)
+    payment_time = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    order = relationship("Order")
+
+
+# 👇 OUTSIDE Payment class
+class VendorPayment(Base):
+    __tablename__ = "vendor_payments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    restaurant_id = Column(
+        Integer,
+        ForeignKey("restaurants.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True
+    )
+    upi_id = Column(String(255), nullable=False)
+    qr_image = Column(String(500), nullable=False)
+    account_holder_name = Column(String(255), nullable=False)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    restaurant = relationship("Restaurant")

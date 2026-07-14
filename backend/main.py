@@ -4,6 +4,7 @@ import os
 import uuid
 from typing import Dict, List, Optional
 from dotenv import load_dotenv
+import traceback
 
 load_dotenv()
 
@@ -381,7 +382,6 @@ async def update_item_visibility(item_id: int, visibility_update: schemas.MenuIt
 
 
 # --- PRODUCT CATALOG INTEGRATION ENDPOINTS ---
-
 @app.post("/api/upload")
 async def upload_image(file: UploadFile = File(...)):
     result = cloudinary.uploader.upload(file.file)
@@ -618,5 +618,277 @@ async def delete_product(product_id: int, restaurant_id: int = 1, db: Session = 
     return {"message": "Product deleted successfully"}
 
 
+@app.post("/api/vendor/payment/upload")
+async def upload_vendor_qr(file: UploadFile = File(...)):
+    try:
+        result = cloudinary.uploader.upload(
+            file.file,
+            folder="vendor_qr_codes"
+        )
+
+        return {
+            "success": True,
+            "message": "QR Code uploaded successfully",
+            "image_url": result["secure_url"]
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to upload QR Code: {str(e)}"
+        )
+
+@app.post("/api/vendor/payment", response_model=schemas.VendorPaymentResponse)
+def create_vendor_payment(
+    payment: schemas.VendorPaymentCreate,
+    db: Session = Depends(get_db)
+):
+    # Check restaurant exists
+    restaurant = db.query(models.Restaurant).filter(
+        models.Restaurant.id == payment.restaurant_id
+    ).first()
+
+    if not restaurant:
+        raise HTTPException(status_code=404, detail="Restaurant not found")
+
+    # Check if payment settings already exist
+    existing = db.query(models.VendorPayment).filter(
+        models.VendorPayment.restaurant_id == payment.restaurant_id
+    ).first()
+
+    if existing:
+        raise HTTPException(
+            status_code=400,
+            detail="Vendor payment already exists. Use update API."
+        )
+
+    vendor_payment = models.VendorPayment(
+        restaurant_id=payment.restaurant_id,
+        account_holder_name=payment.account_holder_name,
+        upi_id=payment.upi_id,
+        qr_image=payment.qr_image,
+        is_active=True
+    )
+
+    db.add(vendor_payment)
+    db.commit()
+    db.refresh(vendor_payment)
+
+    return vendor_payment
+
+@app.get("/api/vendor/payment/{restaurant_id}", response_model=schemas.VendorPaymentResponse)
+def get_vendor_payment(
+    restaurant_id: int,
+    db: Session = Depends(get_db)
+):
+    payment = db.query(models.VendorPayment).filter(
+        models.VendorPayment.restaurant_id == restaurant_id,
+        models.VendorPayment.is_active == True
+    ).first()
+
+    if not payment:
+        raise HTTPException(
+            status_code=404,
+            detail="Vendor payment details not found"
+        )
+
+    return payment
+
+@app.put("/api/vendor/payment/{restaurant_id}", response_model=schemas.VendorPaymentResponse)
+def update_vendor_payment(
+    restaurant_id: int,
+    payment: schemas.VendorPaymentUpdate,
+    db: Session = Depends(get_db)
+):
+    vendor_payment = db.query(models.VendorPayment).filter(
+        models.VendorPayment.restaurant_id == restaurant_id
+    ).first()
+
+    if not vendor_payment:
+        raise HTTPException(
+            status_code=404,
+            detail="Vendor payment details not found"
+        )
+
+    vendor_payment.account_holder_name = payment.account_holder_name
+    vendor_payment.upi_id = payment.upi_id
+    vendor_payment.qr_image = payment.qr_image
+    vendor_payment.is_active = payment.is_active
+
+    db.commit()
+    db.refresh(vendor_payment)
+
+    return vendor_payment
+
+@app.delete("/api/vendor/payment/{restaurant_id}")
+def delete_vendor_payment(
+    restaurant_id: int,
+    db: Session = Depends(get_db)
+):
+    vendor_payment = db.query(models.VendorPayment).filter(
+        models.VendorPayment.restaurant_id == restaurant_id
+    ).first()
+
+    if not vendor_payment:
+        raise HTTPException(
+            status_code=404,
+            detail="Vendor payment details not found"
+        )
+
+    db.delete(vendor_payment)
+    db.commit()
+
+    return {
+        "success": True,
+        "message": "Vendor payment details deleted successfully"
+    }
+@app.post("/api/orders/{order_id}/payment", response_model=schemas.PaymentResponse)
+def create_payment(
+    order_id: int,
+    payment: schemas.PaymentCreate,
+    db: Session = Depends(get_db)
+):
+    # Check Order
+    order = db.query(models.Order).filter(
+        models.Order.id == order_id
+    ).first()
+
+    if not order:
+        raise HTTPException(
+            status_code=404,
+            detail="Order not found"
+        )
+
+    # Check if payment already exists
+    existing_payment = db.query(models.Payment).filter(
+        models.Payment.order_id == order_id
+    ).first()
+
+    if existing_payment:
+        raise HTTPException(
+            status_code=400,
+            detail="Payment already submitted for this order"
+        )
+
+    db_payment = models.Payment(
+        order_id=order.id,
+        amount=order.total_amount,
+        transaction_id=payment.transaction_id,
+        payer_name=payment.payer_name,
+        payer_upi=payment.payer_upi,
+        status=models.PaymentStatus.PENDING
+    )
+
+    db.add(db_payment)
+    db.commit()
+    db.refresh(db_payment)
+
+    return db_payment
+
+@app.patch("/api/payments/{payment_id}/verify", response_model=schemas.PaymentResponse)
+async def verify_payment(
+    payment_id: int,
+    payment: schemas.PaymentVerify,
+    db: Session = Depends(get_db)
+):
+    db_payment = db.query(models.Payment).filter(
+        models.Payment.id == payment_id
+    ).first()
+
+    if not db_payment:
+        raise HTTPException(
+            status_code=404,
+            detail="Payment not found"
+        )
+
+    db_payment.status = payment.status
+    db_payment.payment_time = datetime.utcnow()
+
+    # Update Order Status
+    order = db.query(models.Order).filter(
+        models.Order.id == db_payment.order_id
+    ).first()
+
+    if payment.status == models.PaymentStatus.PAID:
+        order.status = models.OrderStatus.COOKING
+
+    db.commit()
+    db.refresh(db_payment)
+
+    await sio.emit(
+        "order_update",
+        "UPDATE_ORDERS",
+        room=f"restaurant_{order.restaurant_id}"
+    )
+
+    return db_payment
+
+@app.get("/api/payments/{payment_id}", response_model=schemas.PaymentResponse)
+def get_payment(
+    payment_id: int,
+    db: Session = Depends(get_db)
+):
+    payment = db.query(models.Payment).filter(
+        models.Payment.id == payment_id
+    ).first()
+
+    if not payment:
+        raise HTTPException(
+            status_code=404,
+            detail="Payment not found"
+        )
+
+    return payment            
+
+@app.get("/api/orders/{order_id}/bill", response_model=schemas.OrderBillResponse)
+def get_order_bill(
+    order_id: int,
+    db: Session = Depends(get_db)
+):
+    order = (
+        db.query(models.Order)
+        .filter(models.Order.id == order_id)
+        .first()
+    )
+
+    if not order:
+        raise HTTPException(
+            status_code=404,
+            detail="Order not found"
+        )
+
+    items = []
+
+    subtotal = 0
+
+    for item in order.items:
+        line_total = item.price_at_time_of_order * item.quantity
+        subtotal += line_total
+
+        items.append(
+            schemas.OrderBillItem(
+                name=item.menu_item.name,
+                quantity=item.quantity,
+                rate=item.price_at_time_of_order
+            )
+        )
+
+    gst_amount = 0
+
+    return schemas.OrderBillResponse(
+        order_id=order.id,
+        order_number=order.order_number,
+        customer_name="Walk-in Customer",
+        customer_mobile="",
+        subtotal=subtotal,
+        gst_amount=gst_amount,
+        total_amount=order.total_amount,
+        items=items
+    )                
+
+
 # Wrap the FastAPI app with the Socket.io ASGIApp so that uvicorn runs it directly
 app = socketio.ASGIApp(sio, other_asgi_app=app)
+
+
+

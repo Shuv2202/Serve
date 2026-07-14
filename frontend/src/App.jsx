@@ -25,6 +25,12 @@ function App() {
   const [isCheckingOut, setIsCheckingOut] = useState(false);
   const [isCartOpen, setIsCartOpen] = useState(false);
 
+const [showPaymentMethodModal, setShowPaymentMethodModal] = useState(false);
+const [showUPIModal, setShowUPIModal] = useState(false);
+const [paymentMethod, setPaymentMethod] = useState("cash");
+const [vendorPayment, setVendorPayment] = useState(null);
+const [loadingPayment, setLoadingPayment] = useState(false);
+
   const params = new URLSearchParams(window.location.search);
   const RESTAURANT_ID = Number(params.get('restaurant_id')) || 1;
 
@@ -112,6 +118,30 @@ function App() {
     setActiveCategory(catId);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
+
+  const fetchVendorPayment = async () => {
+    try {
+      setLoadingPayment(true);
+  
+      const response = await fetch(
+        `${API_URL}/api/vendor/payment/${RESTAURANT_ID}`
+      );
+  
+      if (!response.ok) {
+        throw new Error("Payment details not found");
+      }
+  
+      const data = await response.json();
+  
+      setVendorPayment(data);
+    } catch (err) {
+      console.error(err);
+      alert("Unable to load payment details.");
+    } finally {
+      setLoadingPayment(false);
+    }
+  };
+
 
   const addToCart = (item) => {
     setCart((prev) => {
@@ -485,13 +515,167 @@ function App() {
               className="checkout-btn"
               onClick={(e) => {
                 e.stopPropagation();
-                handleCheckout();
+                setShowPaymentMethodModal(true);
               }}
               disabled={isCheckingOut}
             >
               {isCheckingOut ? 'Placing Order...' : 'Place Order'}
             </button>
           </div>
+
+          {showPaymentMethodModal && (
+  <div className="cart-drawer-overlay">
+    <div
+      style={{
+        background: "#fff",
+        width: "90%",
+        maxWidth: "420px",
+        borderRadius: "20px",
+        padding: "24px",
+        margin: "80px auto",
+      }}
+    >
+      <h2 style={{ marginBottom: "20px" }}>Choose Payment Method</h2>
+
+      <label
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "10px",
+          marginBottom: "15px",
+          cursor: "pointer",
+        }}
+      >
+        <input
+          type="radio"
+          value="upi"
+          checked={paymentMethod === "upi"}
+          onChange={() => setPaymentMethod("upi")}
+        />
+        Pay Online (UPI)
+      </label>
+
+      <label
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "10px",
+          marginBottom: "20px",
+          cursor: "pointer",
+        }}
+      >
+        <input
+          type="radio"
+          value="cash"
+          checked={paymentMethod === "cash"}
+          onChange={() => setPaymentMethod("cash")}
+        />
+        Cash
+      </label>
+
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          marginTop: "25px",
+        }}
+      >
+        <button
+          onClick={() => setShowPaymentMethodModal(false)}
+          className="add-btn"
+        >
+          Cancel
+        </button>
+
+        <button
+          className="checkout-btn"
+          onClick={async () => {
+            if (paymentMethod === "cash") {
+              setShowPaymentMethodModal(false);
+              handleCheckout();
+            } else {
+              await fetchVendorPayment();
+              setShowPaymentMethodModal(false);
+              setShowUPIModal(true);
+            }
+          }}
+        >
+          Continue
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+
+
+{showUPIModal && (
+  <div className="cart-drawer-overlay">
+    <div
+      style={{
+        background: "#fff",
+        width: "90%",
+        maxWidth: "420px",
+        borderRadius: "20px",
+        padding: "24px",
+        margin: "60px auto",
+        textAlign: "center",
+      }}
+    >
+      <h2>Scan & Pay</h2>
+
+      <h3 style={{ margin: "15px 0" }}>
+        ₹{totalPrice}
+      </h3>
+
+      {loadingPayment ? (
+        <p>Loading QR...</p>
+      ) : (
+        <>
+          <img
+            src={vendorPayment?.qr_image}
+            alt="QR Code"
+            style={{
+              width: "220px",
+              height: "220px",
+              objectFit: "cover",
+              borderRadius: "12px",
+              marginBottom: "20px",
+            }}
+          />
+
+          <h4>{vendorPayment?.account_holder_name}</h4>
+
+          <p>{vendorPayment?.upi_id}</p>
+        </>
+      )}
+
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          marginTop: "25px",
+        }}
+      >
+        <button
+          className="add-btn"
+          onClick={() => setShowUPIModal(false)}
+        >
+          Cancel
+        </button>
+
+        <button
+          className="checkout-btn"
+          onClick={() => {
+            setShowUPIModal(false);
+            handleCheckout();
+          }}
+        >
+          I've Paid
+        </button>
+      </div>
+    </div>
+  </div>
+)}
         </>
       )}
     </div>
